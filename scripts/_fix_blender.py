@@ -89,17 +89,47 @@ def fix_model(filepath, output_path, auto_mode):
             print(f"  PBR 连接 {mat.name}: Image_1 → SeparateColor → Roughness/Metallic")
             fixes_applied.append({"fix": "pbr_connection", "material": mat.name})
 
-    # === 修复 5: 法线修复 ===
+    # === 修复 5: 网格清理（合并重叠顶点 + 清理退化面）===
     for obj in bpy.data.objects:
         if obj.type == 'MESH':
             bpy.context.view_layer.objects.active = obj
             obj.select_set(True)
+
+            pre_verts = len(obj.data.vertices)
+            pre_faces = len(obj.data.polygons)
+
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.mesh.select_all(action='SELECT')
+
+            # 合并距离内的重叠顶点（消除表面凸起主因）
+            bpy.ops.mesh.remove_doubles(threshold=0.0001)
+
+            # 删除面积为0的退化面
+            bpy.ops.mesh.delete_loose()
+            # clean_vertices 在 Blender 4.5 中移除，用手动方式
+            bpy.ops.mesh.dissolve_degenerate(threshold=0.0001)
+
+            # 法线统一朝外
             bpy.ops.mesh.normals_make_consistent(inside=False)
+
             bpy.ops.object.mode_set(mode='OBJECT')
             obj.select_set(False)
-            fixes_applied.append({"fix": "recalculate_normals", "object": obj.name})
+
+            post_verts = len(obj.data.vertices)
+            post_faces = len(obj.data.polygons)
+            merged = pre_verts - post_verts
+            removed_faces = pre_faces - post_faces
+
+            if merged > 0 or removed_faces > 0:
+                print(f"  网格清理 {obj.name}: 合并 {merged} 重叠顶点, 删除 {removed_faces} 退化面")
+                fixes_applied.append({
+                    "fix": "mesh_cleanup",
+                    "object": obj.name,
+                    "merged_vertices": merged,
+                    "removed_faces": removed_faces,
+                    "pre_verts": pre_verts,
+                    "post_verts": post_verts,
+                })
 
     # === 修复 6: 底面对齐 z=0 ===
     for obj in bpy.data.objects:
